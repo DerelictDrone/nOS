@@ -19,10 +19,11 @@ local function registerHotkey(keycode,fn,force,noreplace)
 		fn=fn,
 		pid=os.getPid()
 	}
+	return true
 end
 
-function io.registerHotkey(keycode,event,force)
-	return registerHotkey(keycode,event,force)
+function io.registerHotkey(keycode,fn,force)
+	return registerHotkey(keycode,fn,force)
 end
 
 local blacklistEvent = nOSModule.blacklistEvent
@@ -100,8 +101,7 @@ local function windowizer(env,program,args)
 	local x,y = lterm.getSize()
 	local newterm = window.create(term.current(),1,2,x,y-1,false)
 	local curterm = newterm
-	setmetatable(newterm,{__index = lterm})
-	local exposedterm = setmetatable({},{__index = newterm})
+	local exposedterm = setmetatable({},createProxyTable(newterm))
 	function exposedterm.native()
 		return newterm
 	end
@@ -110,7 +110,7 @@ local function windowizer(env,program,args)
 	end
 	function exposedterm.redirect(termobj)
 		local oldterm = curterm
-		setmetatable(exposedterm,{__index = termobj})
+		setmetatable(exposedterm,createProxyTable(termobj))
 		return oldterm
 	end
 	newterm.native = exposedterm.native

@@ -215,8 +215,7 @@ local function pullEventReplacer(env,program,args)
 		)
 		return table.unpack(returner)
 	end
-	setmetatable(newOS,{__index = os})
-	env.os = newOS
+	env.os = setmetatable(newOS,createProxyTable({env.os or os}))
 	setfenv(newOS.pullEvent,env)
 	setfenv(newOS.pullEventRaw,env)
 	setfenv(pullStdin,env)
