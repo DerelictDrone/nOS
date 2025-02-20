@@ -178,10 +178,10 @@ local function addPipes(env, program, args)
 		forkers[pid] = {readable}
 		return readable, writable
 	end
-	env.io.createPipePair = function() return createPipePair(program.pid) end
-	program.pipes_ext[1], program.pipes[1] = env.io.createPipePair()
-	program.pipes[2], program.pipes_ext[2] = env.io.createPipePair()
-	program.pipes_ext[3], program.pipes[3] = env.io.createPipePair()
+	local pid = program.pid
+	program.pipes_ext[1], program.pipes[1] = createPipePair(pid)
+	program.pipes[2], program.pipes_ext[2] = createPipePair(pid)
+	program.pipes_ext[3], program.pipes[3] = createPipePair(pid)
 	if env.io then
 		env.io.stdout = program.pipes[1]
 		env.io.stdin  = program.pipes[2]
@@ -192,9 +192,10 @@ local function addPipes(env, program, args)
 			stdin  = program.pipes[2],
 			stderr = program.pipes[3],
 		}
+		local iometa = createProxyTable({io})
+		setmetatable(env.io,iometa)
 	end
-	local iometa = createProxyTable({env.io or io})
-	setmetatable(env.io,iometa)
+	env.io.createPipePair = function() return createPipePair(program.pid) end
 end
 
 local function copyPipe(pipe, pipe_meta)
