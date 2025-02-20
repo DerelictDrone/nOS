@@ -201,7 +201,7 @@ function newOS()
                     i = i - 1
                     curProcess = table.remove(eventListenerSet,1)
                     for _,exit_fn in ipairs(curProcess.on_exit) do
-                        pcall(exit_fn)
+                        pcall(exit_fn,curProcess)
                     end
                 end
             end
