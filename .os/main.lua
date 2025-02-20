@@ -79,33 +79,6 @@ function newOS()
     function os.getPid()
         return currentRunningPid
     end
-    function _G.error(...)
-        if not pidRefs[os.getPid()] then
-            olderr(...,2)
-            sleep(2)
-            return
-        end
-        local p = pidRefs[os.getPid()].env
-        for _,i in ipairs(table.pack(...)) do
-            p.io.stderr:write(tostring(i))
-        end
-        olderr(...,2)
-    end
-    function _G.printError(...)
-        if not pidRefs[os.getPid()] then
-            print(...)
-            sleep(2)
-            return
-        end
-        local p = pidRefs[os.getPid()].env
-        for _,i in ipairs(table.pack(...)) do
-            p.io.stderr:write(tostring(i))
-        end
-    end
-    error = _G.error
-    printError = _G.printError
-    _ENV.error = _G.error
-    _ENV.printError = _G.printError
     function os.exit()
         pidRefs[currentRunningPid].dead = true
         coroutine.yield()

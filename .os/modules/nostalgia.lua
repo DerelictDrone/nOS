@@ -113,7 +113,31 @@ local function windowizer(env,program,args)
 	env.read = env.read or setfenv(biosCopies.read,env)
 	env.write = env.write or setfenv(biosCopies.write,env)
 	env.print = env.print or setfenv(biosCopies.print,env)
-	env.printError = env.printError or setfenv(biosCopies.printError,env)
+	local olderr = error
+	local function err(msg)
+		io.stderr:write(tostring(msg))
+		olderr("",0)
+	end
+	env.error = err
+	local function pcall2(...)
+		env.error = olderr
+		env.pcall = pcall
+		local ret = table.pack(pcall(...))
+		env.pcall = pcall2
+		env.error = err
+		return table.unpack(ret)
+	end
+
+	env.pcall = pcall
+
+	function env.printError(...)
+		for ind,i in ipairs(table.pack(...)) do
+			io.stderr:write((ind > 1 and " " or "")..tostring(i))
+		end
+		io.stderr:write("\n")
+	end
+	setfenv(env.error,env)
+	setfenv(env.printError,env)
 	-- terminal command structure
 	-- 0(n) fn_ind(n) params
 	-- if length of stdout < fn_ind's needed params
@@ -328,6 +352,25 @@ local function windowizer(env,program,args)
 				return newterm[k](...)
 			end
 		end
+	end
+	table.insert(program.onExit,function(self)
+		program_bar_dirty = true
+	end)
+	if env.fs.isVirtual then
+		-- Mount a virtual file containing the error output
+		table.insert(program.onExit,function(self)
+			local err = self.pipes_ext[3]._handle
+			local errorText = err.read(err.length())
+			env.fs.mountGlobal("nostalgia/errors",{files = {[tostring(program.pid)] = errorText}})
+		end)
+	else
+		-- Dump function to screen
+		table.insert(program.onExit,function(self)
+			local err = self.pipes_ext[3]._handle
+			if err.length > 0 then
+				print(err.read(err.length()))
+			end
+		end)
 	end
 	env.term = term_installer
 	env.multishell = multishellImplementation
