@@ -66,25 +66,8 @@ end
 local xmod = 0
 local ymod = -1
 
-function processors.NOS_LL_mouse_drag(m,x,y)
-	if (y+ymod) == 0 or (x+xmod) == 0 then return end
-	return 4,"d",m,(x+xmod),(y+ymod)
-end
-
-function processors.NOS_LL_mouse_scroll(m,x,y)
-	if (y+ymod) == 0 or (x+xmod) == 0 then return end
-	return 4,"s",m,(x+xmod),(y+ymod)
-end
-
-function processors.NOS_LL_mouse_click(m,x,y)
-	if (y+ymod) == 0 or (x+xmod) == 0 then return end
-	return 4,"c",m,(x+xmod),(y+ymod)
-end
-
-function processors.NOS_LL_mouse_up(m,x,y)
-	if (y+ymod) == 0 or (x+xmod) == 0 then return end
-	return 4,"u",m,(x+xmod),(y+ymod)
-end
+local program_positions = {}
+local program_bar_dirty = false
 
 local function generateBiosFuncCopies()
 	local env = setmetatable({},{__index=_G})
@@ -101,7 +84,7 @@ local function windowizer(env,program,args)
 	local x,y = lterm.getSize()
 	local newterm = window.create(term.current(),1,2,x,y-1,false)
 	local curterm = newterm
-	local exposedterm = setmetatable({},createProxyTable(newterm))
+	local exposedterm = setmetatable({},createProxyTable({newterm}))
 	function exposedterm.native()
 		return newterm
 	end
@@ -110,7 +93,7 @@ local function windowizer(env,program,args)
 	end
 	function exposedterm.redirect(termobj)
 		local oldterm = curterm
-		setmetatable(exposedterm,createProxyTable(termobj))
+		setmetatable(exposedterm,createProxyTable({termobj}))
 		return oldterm
 	end
 	newterm.native = exposedterm.native
@@ -336,6 +319,7 @@ local function windowizer(env,program,args)
 		program.window.setup = true
 		term_installer = nil
 		env.term = exposedterm
+		program_bar_dirty = true
 	end
 	for k,v in pairs(lterm) do
 		if type(v) == "function" then
@@ -375,17 +359,20 @@ local function draw_program_bar()
 	lterm.setCursorPos(1,1)
 	lterm.clearLine()
 	lterm.setCursorPos(1,1)
+	program_positions = {}
 	if switchlocked then
 		lterm.blit("Locked ","7777777","FFFFFFF")
 	end
 	for _,program in ipairs(programs) do
 		if program.window and program.window.setup then
 			local str = program.friendlyName or string.match(program.name,"[^\\/]*$")
+			local beforeX,beforeY = term.getCursorPos()
 			if program.pid == currentProcess then 
 				lterm.blit(str,string.rep("F",#str),string.rep("0",#str))
 			else
 				lterm.blit(str,string.rep("0",#str),string.rep("7",#str))
 			end
+			table.insert(program_positions,{program.pid,beforeX,beforeY,lterm.getCursorPos()})
 			lterm.blit(" ","F","F")
 		end
 	end
@@ -403,6 +390,7 @@ local function switchWindow(pid)
 	if newp and newp.window then
 		newp.window.setVisible(true)
 	end
+	program_bar_dirty = true
 	return newp
 end
 
@@ -462,6 +450,35 @@ local function prevWindow(held,up)
 	end
 end
 
+function processors.NOS_LL_mouse_drag(m,x,y)
+	if (y+ymod) == 0 or (x+xmod) == 0 then return end
+	return 4,"d",m,(x+xmod),(y+ymod)
+end
+
+function processors.NOS_LL_mouse_scroll(m,x,y)
+	if (y+ymod) == 0 or (x+xmod) == 0 then return end
+	return 4,"s",m,(x+xmod),(y+ymod)
+end
+
+function processors.NOS_LL_mouse_click(m,x,y)
+	if (y+ymod) == 0 or (x+xmod) == 0 then
+		if m ~= 1 then
+			return
+		end
+		for ind,i in ipairs(program_positions) do
+			if x > i[2] and x < i[4] then
+				switchWindow(i[1])
+			end
+		end
+	end
+	return 4,"c",m,(x+xmod),(y+ymod)
+end
+
+function processors.NOS_LL_mouse_up(m,x,y)
+	if (y+ymod) == 0 or (x+xmod) == 0 then return end
+	return 4,"u",m,(x+xmod),(y+ymod)
+end
+
 multishellImplementation.launch = os.spawn
 
 function multishellImplementation.getTitle(n)
@@ -499,6 +516,7 @@ local function lockAutoSwitching(held,up)
 	if up then
 		switchlocked = not switchlocked
 	end
+	program_bar_dirty = true
 end
 registerHotkey(keys.pageDown,prevWindow,false,true)
 registerHotkey(keys.pageUp,nextWindow,false,true)
@@ -522,5 +540,8 @@ while(true) do
 	if win and win.setup then
 		win.flush()
 	end
-	draw_program_bar()
+	if program_bar_dirty then
+		draw_program_bar()
+		program_bar_dirty = false
+	end
 end
