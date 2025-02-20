@@ -56,7 +56,7 @@ function newOS()
                 env = env,
                 startTime = os.clock(),
                 listeners = {"NOS_no_filter"},
-                on_exit = {},
+                onExit = {},
             }
             local arg = table.pack(...)
             patchEnv(env,program,arg)
@@ -69,7 +69,11 @@ function newOS()
         return curPid, os.getProgram(curPid)
     end
     function os.kill(pid)
-        pidRefs[pid].dead = true
+        if pidRefs[pid] then
+            pidRefs[pid].dead = true
+            return true
+        end
+        return false
     end
     local currentRunningPid = 0
     function os.getPid()
@@ -200,9 +204,6 @@ function newOS()
                 while(curProcess and curProcess.dead) do
                     i = i - 1
                     curProcess = table.remove(eventListenerSet,1)
-                    for _,exit_fn in ipairs(curProcess.on_exit) do
-                        pcall(exit_fn,curProcess)
-                    end
                 end
             end
             if curProcess then
@@ -273,6 +274,9 @@ function newOS()
                 for ind,i in ipairs(topLevelCoroutines) do
                     if i == process then
                         table.remove(topLevelCoroutines,ind)
+                        for _,exit_fn in ipairs(i.onExit) do
+                            pcall(exit_fn,i)
+                        end
                         break
                     end
                 end
