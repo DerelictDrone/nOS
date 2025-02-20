@@ -2,7 +2,7 @@ local global_mounts = {}
 
 local function generic_string_fhandle(self,mode)
 	local closed = false
-	local binary = false -- binary mode isn't even supported in regular fs
+	local binary = false
 	local ptr = 0
 		local handle = {
 		close = function()
@@ -187,11 +187,34 @@ local function addVirtualFS(env,program)
 		if not data or not data.files then return end
 		for k,v in pairs(data.files) do
 			if type(v) == "string" then
-				global_mounts[dir.."/"..k] = {
+				__newindex(global_mounts,dir.."/"..k, {
 					v,
 					generic_string_fhandle
-				}
+				})
 			end
+		end
+	end
+	function vfs.unmount(path)
+		if vfs.isVirtual(path) then
+			if not program.local_mounts[path] then
+				return false,"Path is globally mounted, use fs.unmountGlobal"
+			end
+			program.local_mounts[path] = nil
+			return true
+		else
+			return false,"Path is not virtual"
+		end
+	end
+	vfs.unmountLocal = vfs.unmount
+	function vfs.unmountGlobal(path)
+		if vfs.isVirtual(path) then
+			if not __index(global_mounts,path) then
+				return false,"Path is locally mounted, use fs.unmountLocal"
+			end
+			__newindex(global_mounts,path,nil)
+			return true
+		else
+			return false,"Path is not virtual"
 		end
 	end
 	function vfs.getLocalMounts()
