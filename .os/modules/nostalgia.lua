@@ -111,8 +111,8 @@ local function windowizer(env,program,args)
 
 	local biosCopies = generateBiosFuncCopies(env)
 	env.read = env.read or setfenv(biosCopies.read,env)
-	env.write = env.write or setfenv(biosCopies.write,env)
-	env.print = env.print or setfenv(biosCopies.print,env)
+	env.write = setfenv(biosCopies.write,env)
+	env.print = setfenv(biosCopies.print,env)
 	local olderr = error
 	local function err(msg)
 		io.stderr:write(tostring(msg))
@@ -128,11 +128,22 @@ local function windowizer(env,program,args)
 		return table.unpack(ret)
 	end
 
-	env.pcall = pcall
+	env.pcall = pcall2
 
 	function env.printError(...)
 		for ind,i in ipairs(table.pack(...)) do
 			io.stderr:write((ind > 1 and " " or "")..tostring(i))
+		end
+		do -- old printError
+			local oldColour
+			if term.isColour() then
+				oldColour = term.getTextColour()
+				term.setTextColour(colors.red)
+			end
+			print(...)
+			if term.isColour() then
+				term.setTextColour(oldColour)
+			end
 		end
 		io.stderr:write("\n")
 	end

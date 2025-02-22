@@ -47,6 +47,7 @@ function newOS()
         ["NOS_no_filter"] = {}
     }
     local curPid = 0
+    local err = ""
     function os.version() return "NOS 1.9" end
     function os.spawn(env,filename,...)
         curPid = curPid + 1
@@ -58,10 +59,12 @@ function newOS()
                 listeners = {"NOS_no_filter"},
                 onExit = {},
             }
+            env._G = env
+            env._ENV = env
             local arg = table.pack(...)
             patchEnv(env,program,arg)
             program.coroutine = coroutine.create(
-                function() os.run(env,filename,table.unpack(arg,1,arg.n)) end
+                function() loadfile(filename,nil,env)() end
                 )
             pidRefs[curPid] = program
         table.insert(topLevelCoroutines,program)
@@ -227,19 +230,6 @@ function newOS()
             }
         },ospath.."modules/"..i)
         runSet({pidRefs[pid]})
-    end
-    local function recurse(t,str)
-        str = str or ""
-        if type(t) == "table" then
-            for k,v in pairs(t) do
-                if type(v) == "table" then
-                    str = recurse(v,str)
-                else
-                    str = str .. k .. " = " .. tostring(v) .. "\n"
-                end
-            end
-        end
-        return str
     end
     while(true) do
         if deadProcessCount > 0 then

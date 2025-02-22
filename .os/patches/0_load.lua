@@ -150,11 +150,18 @@ local function load_apis(dir,env,indexer)
 end
 
 local function apiLoader(env,program,args)
+	local meta = debug.getmetatable(env)
 	local function indexer(self,k)
 		local v = rawget(env,k)
 		if v ~= nil then return v end
 		return rawget(_G,k)
 	end
+	-- load anything else missing from _G
+		for k,v in pairs(_G) do
+			if env[k] == nil then
+				env[k] = v
+			end
+		end
 	do
 		local h = fs.open("rom/modules/main/cc/expect.lua", "r")
 		local f, err = loadstring(h.readAll(), "@/rom/modules/main/cc/expect.lua")
@@ -188,13 +195,27 @@ local function apiLoader(env,program,args)
 					return nil
 				end,
 			}
-			setmetatable(commands, tCaseInsensitiveMetatable)
-			setmetatable(commands.async, tCaseInsensitiveMetatable)
+			setmetatable(env.commands, tCaseInsensitiveMetatable)
+			setmetatable(env.commands.async, tCaseInsensitiveMetatable)
 
 			-- Add global "exec" function
-			exec = commands.exec
+			env.exec = env.commands.exec
 		end
 	end
+	function env.getmetatable(t)
+		local m = debug.getmetatable(t)
+		if m and m.__metatable == false then return nil end
+		return m
+	end
+	function env.setmetatable(t,nm)
+		local m = debug.getmetatable(t)
+		if m and m.__metatable == false then return t end
+		debug.setmetatable(t,nm)
+		return t
+	end
+	setmetatable(env,meta)
+	env.addEnvPatch = nil
+	env.addProgramMeta = nil
 end
 
 addEnvPatch(apiLoader)
