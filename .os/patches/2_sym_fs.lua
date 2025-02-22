@@ -117,6 +117,27 @@ local function addFS(env)
 	function nfs.getPreferSymbols()
 		return nfs.preferSymbols
 	end
+	if fs.registerAttributeProvider then
+		fs.registerAttributeProvider(function(path,attributes)
+			if nfs.isSym(path) then
+				local p = nfs.getSymRef(path)
+				local attr = fs.attributes(p)
+				for k,v in pairs(attr) do
+					attributes[k] = v
+				end
+				attributes.isSymbolic = true
+			end
+		end)
+	end
+	if fs.getAttributeColor then
+		fs.registerColorProvider(function(attributes)
+			if not attributes.isSymbolic then return end
+			if attributes.isDir then
+				return colors.blue
+			end
+			return colors.lightBlue
+		end,1)
+	end
 end
 
 addEnvPatch(addFS)

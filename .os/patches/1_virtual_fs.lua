@@ -175,9 +175,17 @@ local function addVirtualFS(env,program)
 		if not data or not data.files then return end
 		for k,v in pairs(data.files) do
 			if type(v) == "string" then
+				local time = os.time(os.date("*t"))
 				program.local_mounts[dir.."/"..k] = {
 					v,
-					generic_string_fhandle
+					generic_string_fhandle,
+					attributes = {
+						created = time,
+						modified = time,
+						modification = time,
+						size = #v,
+						isReadOnly = false
+					}
 				}
 			end
 		end
@@ -187,9 +195,17 @@ local function addVirtualFS(env,program)
 		if not data or not data.files then return end
 		for k,v in pairs(data.files) do
 			if type(v) == "string" then
+				local time = os.time(os.date("*t"))
 				__newindex(global_mounts,dir.."/"..k, {
 					v,
-					generic_string_fhandle
+					generic_string_fhandle,
+					attributes = {
+						created = time,
+						modified = time,
+						modification = time,
+						size = #v,
+						isReadOnly = false
+					}
 				})
 			end
 		end
@@ -258,6 +274,30 @@ local function addVirtualFS(env,program)
 			return false
 		end
 	end
+	function vfs.isVirtualLocal(name)
+		if vfs.preferVirtualFiles then
+			if __index(program.local_mounts,name) then return true end
+			return false
+		else
+			if fs.exists(name) then
+				return false
+			end
+			if __index(program.local_mounts,name) then return true end
+			return false
+		end
+	end
+	function vfs.isVirtualGlobal(name)
+		if vfs.preferVirtualFiles then
+			if __index(global_mounts,name) then return true end
+			return false
+		else
+			if fs.exists(name) then
+				return false
+			end
+			if __index(global_mounts,name) then return true end
+			return false
+		end
+	end
 	function vfs.isDir(name)
 		if not name then return fs.isDir(name) end
 		local tested
@@ -319,8 +359,8 @@ local function addVirtualFS(env,program)
 		end
 	end
 	function vfs.list(dir)
-		local f = program.local_mounts[dir]
 		local m = getmetatable(program.local_mounts)
+		local f = m.__original_index(program.local_mounts,dir)
 		local g = m.__original_index(global_mounts,dir)
 		local l = {}
 		if fs.exists(dir) then
@@ -427,6 +467,44 @@ local function addVirtualFS(env,program)
 		find_aux("", parts, 1, out)
 		return out
 	end
+	if fs.registerAttributeProvider then
+		fs.registerAttributeProvider(function(path,attributes)
+			local virtual = vfs.isVirtual(path)
+			if virtual then
+				local vattr = program.local_mounts[path].attributes
+				if vattr then
+					for k,v in pairs(vattr) do
+						attributes[k] = v
+					end
+				else
+					attributes.isReadOnly = false
+					attributes.created = 0
+					attributes.modification = 0
+					attributes.modified = 0
+					attributes.size = 0
+				end
+				attributes.isVirtual = virtual
+				attributes.isVirtualGlobal = vfs.isVirtualGlobal(path)
+				attributes.isDir = vfs.isDir(path)
+			else
+				attributes.isVirtual = false
+				attributes.isVirtualGlobal = false
+			end
+		end)
+	end
+	if fs.getAttributeColor then
+		fs.registerColorProvider(function(attributes)
+			if not attributes.isVirtual then return end
+			if attributes.isDir then
+				return colors.pink
+			end
+			if attributes.isVirtualGlobal then
+				return colors.magenta
+			end
+			return colors.purple
+		end,1)
+	end
+
 end
 
 addEnvPatch(addVirtualFS)
