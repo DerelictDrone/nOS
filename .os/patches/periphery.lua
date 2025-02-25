@@ -165,7 +165,7 @@ function rperipheral.removeRemotePeripheral(name)
 	rperipherals[name] = nil
 	rperipherals_by_host[meta.host][meta.rname] = nil
 	for _,type in ipairs(meta.types) do
-		rperipherals_by_type[i][name] = nil
+		rperipherals_by_type[type][name] = nil
 	end
 end
 
