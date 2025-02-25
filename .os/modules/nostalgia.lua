@@ -572,9 +572,9 @@ local function lockAutoSwitching(held,up)
 	end
 	program_bar_dirty = true
 end
-registerHotkey(keys.pageDown,prevWindow,false,true)
-registerHotkey(keys.pageUp,nextWindow,false,true)
-registerHotkey(keys["end"],lockAutoSwitching,false,true)
+registerHotkey(keys.pageUp,prevWindow,false,true)
+registerHotkey(keys.pageDown,nextWindow,false,true)
+registerHotkey(keys.f1,lockAutoSwitching,false,true)
 
 while(true) do
 	local t = table.pack(os.pullEventRaw())
