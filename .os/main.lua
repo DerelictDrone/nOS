@@ -64,7 +64,7 @@ function newOS()
             local arg = table.pack(...)
             patchEnv(env,program,arg)
             program.coroutine = coroutine.create(
-                function() loadfile(filename,nil,env)() end
+                function() loadfile(filename,nil,env)(table.unpack(arg)) end
                 )
             pidRefs[curPid] = program
         table.insert(topLevelCoroutines,program)
