@@ -4,8 +4,10 @@ local function generatePathPolyfill(fn,path_transforms)
 	return function(path)
 		if not path then return fn(path) end
 		local spath = path
+		local succ
 		for ind,i in ipairs(path_transforms) do
-			spath = i(spath)
+			succ,spath = pcall(i,spath)
+			if not succ then error(spath,2) end
 		end
 		return fn(spath)
 	end
@@ -15,9 +17,12 @@ local function generatePathDestPolyfill(fn,path_transforms)
 	return function(path,dest)
 		if (not path) and (not dest) then return fn(path,dest) end
 		local spath,sdest = path,dest
+		local succ
 		for ind,i in ipairs(path_transforms) do
-			spath = i(spath)
-			sdest = i(sdest)
+			succ,spath = pcall(i,spath)
+			if not succ then error(spath,2) end
+			succ,sdest = pcall(i,sdest)
+			if not succ then error(spath,2) end
 		end
 		return fn(spath,sdest)
 	end
@@ -44,7 +49,6 @@ local pathPolyfills = {
 local pathDestPolyfills = {
 	move = fs.move,
 	copy = fs.copy,
-	open = fs.open
 }
 
 local function createMFS(env,program,arg)
@@ -58,10 +62,11 @@ local function createMFS(env,program,arg)
 		if mfs.allPathsAbsolute then
 			return path
 		end
-		if string.sub(path,1,1) ~= "/" then
+		local sStartChar = path:sub(1, 1)
+		if sStartChar ~= "/" and sStartChar ~= "\\" then
 			return mfs.cwd..path
 		end
-		return path:sub(2)
+		return path
 	end
 	local pathPolyfills,pathDestPolyfills = pathPolyfills,pathDestPolyfills
 	if env.fs then
@@ -78,10 +83,10 @@ local function createMFS(env,program,arg)
 		pathDestPolyfills = newPathDestPolyfills
 	end
 	for k,v in pairs(pathPolyfills) do
-		mfs[k] = generatePathPolyfill(v,path_transforms)
+		mfs[k] = setfenv(generatePathPolyfill(v,path_transforms),env)
 	end
 	for k,v in pairs(pathDestPolyfills) do
-		mfs[k] = generatePathDestPolyfill(v,path_transforms)
+		mfs[k] = setfenv(generatePathDestPolyfill(v,path_transforms),env)
 	end
 	for k,v in pairs(env.fs or fs) do
 		if not mfs[k] then
@@ -94,6 +99,28 @@ local function createMFS(env,program,arg)
 	end
 	function mfs.getCWD()
 		return mfs.cwd
+	end
+	function mfs.combine(start,...)
+		local startc = start:sub(1,1)
+		local str,cwd = "",""
+		local abs = false
+		if startc ~= "/" and startc ~= "\\" then
+			cwd = mfs.getCWD()
+		else
+			abs = true
+		end
+		local s,str = pcall(fs.combine,cwd,start,...)
+		if not s then
+			error(str,2)
+		end
+		if abs then
+			return "/"..str
+		end
+		return str
+	end
+	local open = env.fs.open
+	function mfs.open(p,...)
+		return open(mfs.combine(p),...)
 	end
 	function mfs.setAllPathsAbsolute(bAbsolute)
 		if type(bAbsolute) ~= "boolean" then error("Attempted to set allPathsAbsolute to non-boolean value: "..type(bAbsolute)) end

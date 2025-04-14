@@ -1,16 +1,35 @@
--- hack to get it to pass what I want to its run programs until I make my own shell
--- local envmeta = {__index = function(t,ind)
-	-- if(ind == "_G") then
-	-- 	return _ENV
-	-- end
-	-- local envmatch = _ENV[ind]
-	-- if envmatch then return envmatch end
-	-- return _G[ind]
--- end}
--- local env = {}
--- setmetatable(env,envmeta)
 nOSModule = nil
 if fs.setAllPathsAbsolute then 
 	fs.setAllPathsAbsolute(false)
 end
-loadfile("rom/programs/shell.lua",nil,_ENV)()
+local dir = [[
+function shell.dir()
+	return fs.getCWD()
+end
+]]
+
+local setDir = [[
+function shell.setDir(dir)
+	expect(1, dir, "string")
+	local sChar = string.sub(dir,1,1)
+	if sChar ~= "/" then
+		dir = "/" .. dir or ""
+	end
+	sDir = dir
+	return fs.setCWD(dir)
+end
+]]
+
+local resolve = [[
+function shell.resolve(str)
+	return "/"..fs.combine(str)
+end
+]]
+
+local diffs = {
+	["shell.dir"] = {str = dir},
+	["shell.setDir"] = {str = setDir},
+	["shell.resolve"] = {str = resolve},
+}
+local f = loadFileWithDiffs("rom/programs/shell.lua",diffs,nil,nil,_ENV)
+f()
