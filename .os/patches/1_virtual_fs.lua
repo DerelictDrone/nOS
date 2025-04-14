@@ -345,7 +345,11 @@ local function addVirtualFS(env,program)
 					}
 					return vfs.open(name,mode)
 				end
-				return fs.open(name,mode)
+				local s,e = pcall(fs.open,name,mode)
+				if not s then
+					error(name.."\n"..mode.."\n",1)
+				end
+				return e
 			end
 			return f[2](f,mode)
 		else
@@ -391,7 +395,7 @@ local function addVirtualFS(env,program)
 		return l
 	end
 	function vfs.flushVirtualToDisk(vname,rname)
-		if not fs.isVirtual(vname) then return false,"File isn't virtual" end
+		if not vfs.isVirtual(vname) then return false,"File isn't virtual" end
 		local v = vfs.open(vname,"r")
 		if not v then return false,"Couldn't open virtual file" end
 		local f = fs.open(rname or vname,"w")
