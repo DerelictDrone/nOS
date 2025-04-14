@@ -29,14 +29,13 @@ end
 local blacklistEvent = nOSModule.blacklistEvent
 local addEnvPatch = nOSModule.addEnvPatch
 
-blacklistEvent("char")
-blacklistEvent("key")
-blacklistEvent("key_up")
 blacklistEvent("mouse_click")
 blacklistEvent("mouse_drag")
 blacklistEvent("mouse_scroll")
 blacklistEvent("mouse_up")
 blacklistEvent("terminate")
+blacklistEvent("paste")
+blacklistEvent("file_transfer")
 
 local processors = {}
 
@@ -400,6 +399,14 @@ local programs,pidRefs = nOSModule.getRawPrograms()
 local currentProcess = 0 -- no starter
 local switchlocked = false
 
+function processors.NOS_LL_paste(paste)
+	coroutine.resume(pidRefs[currentProcess].coroutine,"paste",paste)
+end
+
+function processors.NOS_LL_file_transfer(files)
+	coroutine.resume(pidRefs[currentProcess].coroutine,"file_transfer",files)
+end
+
 function processors.NOS_LL_terminate()
 	if switchlocked then
 		os.kill(currentProcess)
@@ -427,7 +434,7 @@ local function draw_program_bar()
 				lterm.blit(str,string.rep("0",#str),string.rep("7",#str))
 			end
 			table.insert(program_positions,{program.pid,beforeX,beforeY,lterm.getCursorPos()})
-			lterm.blit(" ","F","F")
+			lterm.write(" ")
 		end
 	end
 	lterm.setCursorPos(x,y)
@@ -467,7 +474,15 @@ local function findNextWindowProgram()
 			if x then dying = false return x end
 			sleep(1)
 		end
-		os.shutdown()
+		if fs.flushVirtualToDisk then
+			local list = fs.list("nostalgia/errors")
+			if list then
+				for _,file in ipairs(list) do
+					fs.flushVirtualToDisk(file)
+				end
+			end
+		end
+		os.reboot()
 	end
 end
 
@@ -546,6 +561,7 @@ end
 function multishellImplementation.setTitle(n,name)
 	local p = pidRefs[n]
 	if p then
+		program_bar_dirty = true
 		p.friendlyName = tostring(name)
 	end
 end
