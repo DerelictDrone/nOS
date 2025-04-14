@@ -10,7 +10,7 @@ local function addRouter(env,program,args)
 	if env.os then
 		env.os.router = router
 	else
-		env.os = setmetatable({router=router},createProxyTable({os}))
+		env.os = setmetatable({router=router},createProxyTable({env.os or os}))
 	end
 end
 
