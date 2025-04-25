@@ -26,20 +26,172 @@ function io.registerHotkey(keycode,fn,force)
 	return registerHotkey(keycode,fn,force)
 end
 
-local blacklistEvent = nOSModule.blacklistEvent
+local blacklistEvent,whitelistEvent = nOSModule.blacklistEvent,nOSModule.whitelistEvent
 local addEnvPatch = nOSModule.addEnvPatch
 
-blacklistEvent("mouse_click")
-blacklistEvent("mouse_drag")
-blacklistEvent("mouse_scroll")
-blacklistEvent("mouse_up")
 blacklistEvent("terminate")
 blacklistEvent("paste")
 blacklistEvent("file_transfer")
 
-local processors = {}
+local installed_drivers = {}
 
-function processors.NOS_LL_key(key,held)
+-- driver struct
+--[[
+	driver = {
+		events = event_struct[],
+		peripheralTypes = []
+	}
+]]
+
+-- event struct
+--[[
+	name = string,
+	processor = function(event_args),
+	pNameIndex = n -- which parameter to check for peripheral name
+]]
+
+local driverEventRefs = {}
+
+local function installDriver(name,driver,dontReplace)
+	if type(name) ~= "string" then
+		error("type(name) ~= string, got ("..type(name)..")",2)
+	end
+	if type(driver) ~= "table" then
+		error("type(driver) ~= table, got ("..type(driver)..")",2)
+	end
+	if installed_drivers[name] then
+		return nil,"Driver already installed"
+	end
+	for name,_ in pairs(driver.events) do
+		if not driverEventRefs[name] then
+			driverEventRefs[name] = {}
+		end
+		table.insert(driverEventRefs[name],driver)
+		blacklistEvent(name)
+	end
+	local newEvents = {}
+	for k,v in pairs(driver.events) do
+		newEvents[k] = v
+	end
+	local description
+	if type(driver.description) == "string" then
+		description = driver.description
+	end
+	installed_drivers[name] = {
+		events = newEvents,
+		users = {},
+		requireFocus = driver.requireFocus and true or nil,
+		peripheralTypes = driver.peripheralTypes,
+		dontReplace = dontReplace,
+		description = description or "No description provided."
+	}
+	return true
+end
+
+local function uninstallDriver(name)
+	if not installed_drivers[name] then
+		return nil,"No driver installed by this name"
+	end
+	if installed_drivers[name].dontReplace then
+		return false,"Driver cannot be removed"
+	end
+	local driver = installed_drivers[name]
+	for event,_ in pairs(driver.events) do
+		for ind,d in ipairs(driverEventRefs[event]) do
+			if d == driver then
+				table.remove(driverEventRefs[event],d)
+				if #driverEventRefs[event] == 0 then
+					driverEventRefs[event] = nil
+					whitelistEvent(event)
+				end
+				break
+			end
+		end
+	end
+	return true
+end
+
+local driverExitMeta = {
+	__call = function (self)
+		return self.fn()
+	end
+}
+local function internalRemoveDriver(program,name,exit)
+	local d = program.drivers[name]
+	if not d then return false end
+	program.drivers[name] = nil
+	for ind,user in ipairs(d.users) do
+		if user == program then
+		table.remove(d.users,ind)
+		end
+	end
+	if not exit then
+		for ind,i in ipairs(program.onExit) do
+			if type(i) == "table" then
+				if i.fn and i.name == name then
+					table.remove(program.onExit,ind)
+					return true
+				end
+			end
+		end
+	end
+	return true
+end
+
+local function internalUseDriver(program,name)
+	local dtable = installed_drivers[name]
+	if not dtable then
+		return false
+	end
+	program.drivers[name] = dtable
+	table.insert(dtable.users,program)
+	table.insert(program.onExit,setmetatable({
+		fn = function() internalRemoveDriver(program,name) end,
+		name = name
+	},driverExitMeta))
+	return true
+end
+
+local function getDriverInfo(name)
+	local driver = {}
+	local pdriver = installed_drivers[name]
+	if not pdriver then
+		return nil
+	end
+	driver.events = {}
+	driver.requireFocus = pdriver.requireFocus and true or false
+	driver.description = pdriver.description
+	driver.doNotReplace = pdriver.doNotReplace
+	for k,_ in pairs(pdriver.events) do
+		table.insert(driver.events,k)
+	end
+	driver.peripheralTypes = {}
+	for _,v in ipairs(pdriver.peripheralTypes) do
+		table.insert(driver.peripheralTypes,v)
+	end
+	return driver
+end
+
+-- drivers installed on system
+local function getInstalledDrivers()
+	local drivers = {}
+	for k,v in pairs(installed_drivers) do
+		drivers[k] = getDriverInfo(k)
+	end
+	return drivers
+end
+
+-- drivers used by program
+local function internalGetUsedDrivers(program)
+	local drivers = {}
+	for k,v in pairs(program.drivers) do
+		drivers[k] = getDriverInfo(k)
+	end
+	return drivers
+end
+
+
+local function NOS_LL_key(key,held)
 	if hotkeys[key] then
 		-- they'll pass us true if they want us to receive this
 		if not hotkeys[key].fn(held,false) then return end
@@ -51,22 +203,151 @@ function processors.NOS_LL_key(key,held)
 	end
 end
 
-function processors.NOS_LL_key_up(key)
+local function NOS_LL_key_up(key)
 	if hotkeys[key] then
 		if not hotkeys[key].fn(false,true) then return end
 	end
 	return 2,key+0.5
 end
 
-function processors.NOS_LL_char(char)
+local function NOS_LL_char(char)
 	return 2,char
 end
 
+installDriver("os_keyboard",{
+	events = {
+		key = {
+			processor = NOS_LL_key,
+			pNameIndex = 0, -- none
+		},
+		key_up = {
+			processor = NOS_LL_key_up,
+			pNameIndex = 0,
+		},
+		char = {
+			processor = NOS_LL_char,
+			pNameIndex = 0,
+		},
+	},
+	requireFocus = true,
+	peripheralTypes = {},
+	description = "Writes keyboard events to the program's io.stdin while it is focused. As long as it is using said driver."
+})
+
 local xmod = 0
 local ymod = -1
-
 local program_positions = {}
 local program_bar_dirty = false
+local programs,pidRefs = nOSModule.getRawPrograms()
+
+local myProgram = pidRefs[os.getPid()]
+
+local lterm = term
+
+local function crashScreen()
+	lterm.setCursorPos(1,1)
+	lterm.setCursorBlink(false)
+	lterm.setTextColor(colors.white)
+	lterm.setBackgroundColor(colors.blue)
+	lterm.clear()
+	print("NOSTALGIA HAS CRASHED")
+	local c = true
+	local sX,sY = term.getSize()
+	while c do
+		c = myProgram.pipes_ext[3]._handle.read(1)
+		if lterm.getCursorPos() >= sX then
+			local x,y = term.getCursorPos()
+			if y >= sY then
+				lterm.scroll(1)
+				lterm.setCursorPos(1,y)
+			else
+				lterm.setCursorPos(1,y+1)
+			end
+		end
+		if c then
+			lterm.write(c)
+		end
+		sleep() -- aesthetic effect
+	end
+	print("\nREBOOTING PC IN 5 SECONDS")
+	sleep(5)
+	os.reboot()
+end
+
+table.insert(myProgram.onExit,crashScreen)
+
+local currentProcess = 0 -- no starter
+local switchlocked = false
+
+local function switchWindow(pid)
+	local curp = pidRefs[currentProcess]
+	if curp and curp.window then
+		curp.window.setVisible(false)
+		lterm.clear()
+	end
+	local newp = pidRefs[pid]
+	currentProcess = pid
+	if newp and newp.window then
+		newp.window.setVisible(true)
+	end
+	program_bar_dirty = true
+	return newp
+end
+
+local function NOS_LL_mouse_drag(m,x,y)
+	if (y+ymod) == 0 or (x+xmod) == 0 then return end
+	return 4,"d",m,(x+xmod),(y+ymod)
+end
+
+local function NOS_LL_mouse_scroll(m,x,y)
+	if (y+ymod) == 0 or (x+xmod) == 0 then return end
+	return 4,"s",m,(x+xmod),(y+ymod)
+end
+
+local function NOS_LL_mouse_click(m,x,y)
+	if (y+ymod) == 0 or (x+xmod) == 0 then
+		if m ~= 1 then
+			return
+		end
+		for ind,i in ipairs(program_positions) do
+			if x > i[2] and x < i[4] then
+				switchWindow(i[1])
+			end
+		end
+	end
+	return 4,"c",m,(x+xmod),(y+ymod)
+end
+
+local function NOS_LL_mouse_up(m,x,y)
+	if (y+ymod) == 0 or (x+xmod) == 0 then return end
+	return 4,"u",m,(x+xmod),(y+ymod)
+end
+
+installDriver("os_mouse",{
+	events = {
+		mouse_drag = {
+			processor = NOS_LL_mouse_drag,
+			pNameIndex = 0, -- none
+		},
+		mouse_scroll = {
+			processor = NOS_LL_mouse_scroll,
+			pNameIndex = 0,
+		},
+		mouse_click = {
+			processor = NOS_LL_mouse_click,
+			pNameIndex = 0,
+		},
+		mouse_up = {
+			processor = NOS_LL_mouse_up,
+			pNameIndex = 0,
+		},
+	},
+	requireFocus = true,
+	peripheralTypes = {},
+	description = "Writes mouse events to the program's io.stdmouse while it is focused. Will translate Y to account for the program bar."
+})
+
+local processors = {}
 
 local function generateBiosFuncCopies()
 	local env = setmetatable({},{__index=_G})
@@ -75,7 +356,6 @@ local function generateBiosFuncCopies()
 	return env
 end
 
-local lterm = term
 -- an implementation of multishell for compatibility with multishell using programs
 local multishellImplementation = {}
 
@@ -112,10 +392,13 @@ local function windowizer(env,program,args)
 	env.read = env.read or setfenv(biosCopies.read,env)
 	env.write = setfenv(biosCopies.write,env)
 	env.print = setfenv(biosCopies.print,env)
-	local olderr = error
-	local function err(msg)
+	local olderr = r_err
+	local function err(msg,ctx)
 		io.stderr:write(tostring(msg))
-		olderr("",0)
+		if ctx == 0 then
+			return olderr(msg,0)
+		end
+		olderr(msg,ctx+2)
 	end
 	env.error = err
 	local function pcall2(...)
@@ -148,6 +431,29 @@ local function windowizer(env,program,args)
 	end
 	setfenv(env.error,env)
 	setfenv(env.printError,env)
+
+	-- install keyboard driver
+	program.drivers = {}
+	internalUseDriver(program,"os_keyboard")
+	internalUseDriver(program,"os_mouse")
+	function env.os.installDriver(sName,tDriver)
+		return installDriver(sName,tDriver)
+	end
+	function env.os.uninstallDriver(sName)
+		return uninstallDriver(sName)
+	end
+	function env.os.useDriver(sDriver)
+		return internalUseDriver(program,sDriver)
+	end
+	function env.os.removeDriver(sDriver)
+		return internalRemoveDriver(program,sDriver)
+	end
+	function env.os.getUsedDrivers()
+		return internalGetUsedDrivers(program)
+	end
+	function env.os.getInstalledDrivers()
+		return getInstalledDrivers()
+	end
 	-- terminal command structure
 	-- 0(n) fn_ind(n) params
 	-- if length of stdout < fn_ind's needed params
@@ -344,25 +650,32 @@ local function windowizer(env,program,args)
 	end
 	newterm.getBackgroundColour = newterm.getBackgroundColor
 	program.window.flush = flush
-	-- a hooked version, on first call to any function will install the real version
-	-- and then call the desired function
+	-- Hook index of term, if program tries to access it we know it wants a terminal
+	-- and can give it our exposed term obj
 	-- ! This in place so nostalgia can identify which windows are in the background
 	-- ! If they don't use the terminal at all, we won't show them as valid windows.
-	local term_installer = {}
+	local term_installer
 	local function install()
 		program.window.setup = true
 		term_installer = nil
 		env.term = exposedterm
 		program_bar_dirty = true
 	end
-	for k,v in pairs(lterm) do
-		if type(v) == "function" then
-			term_installer[k] = function(...)
-				install()
-				return newterm[k](...)
-			end
-		end
-	end
+	term_installer = setmetatable({},{
+		__index = function(self,k)
+			install()
+			return exposedterm[k]
+		end,
+		__newindex = function(self,k,v)
+			install()
+			exposedterm[k] = v
+		end,
+		__pairs = function(self)
+			install()
+			return pairs(exposedterm)
+		end,
+		__metatable = false
+	})
 	table.insert(program.onExit,function(self)
 		program_bar_dirty = true
 	end)
@@ -371,7 +684,7 @@ local function windowizer(env,program,args)
 		table.insert(program.onExit,function(self)
 			local err = self.pipes_ext[3]._handle
 			local errorText = err.read(err.length())
-			env.fs.mountGlobal("nostalgia/errors",{files = {[tostring(program.pid)] = errorText}})
+			env.fs.mountGlobal(env.fs.combine("/nostalgia/errors"),{files = {[tostring(program.pid)] = errorText}})
 		end)
 	else
 		-- Dump function to screen
@@ -395,10 +708,6 @@ end
 addEnvPatch(windowizer)
 nOSModule.addProgramMeta(appendFriendly)
 
-local programs,pidRefs = nOSModule.getRawPrograms()
-local currentProcess = 0 -- no starter
-local switchlocked = false
-
 function processors.NOS_LL_paste(paste)
 	coroutine.resume(pidRefs[currentProcess].coroutine,"paste",paste)
 end
@@ -411,7 +720,16 @@ function processors.NOS_LL_terminate()
 	if switchlocked then
 		os.kill(currentProcess)
 	else
-		coroutine.resume(pidRefs[currentProcess].coroutine,"terminate")
+		local e = table.pack(coroutine.resume(pidRefs[currentProcess].coroutine,"terminate"))
+		if coroutine.status(pidRefs[currentProcess].coroutine) ~= "dead" then
+			nOSModule.clearListeners(pidRefs[currentProcess])
+			for k,v in ipairs(e) do
+				if type(v) ~= "string" then
+					v = nil
+				end
+				nOSModule.addListener(pidRefs[currentProcess],v or "NOS_no_filter")
+			end
+		end
 	end
 end
 
@@ -440,21 +758,6 @@ local function draw_program_bar()
 	lterm.setCursorPos(x,y)
 end
 
-local function switchWindow(pid)
-	local curp = pidRefs[currentProcess]
-	if curp and curp.window then
-		curp.window.setVisible(false)
-		lterm.clear()
-	end
-	local newp = pidRefs[pid]
-	currentProcess = pid
-	if newp and newp.window then
-		newp.window.setVisible(true)
-	end
-	program_bar_dirty = true
-	return newp
-end
-
 local dying = false
 
 local function findNextWindowProgram()
@@ -475,7 +778,7 @@ local function findNextWindowProgram()
 			sleep(1)
 		end
 		if fs.flushVirtualToDisk then
-			local list = fs.list("nostalgia/errors")
+			local list = fs.list(fs.combine("/nostalgia/errors"))
 			if list then
 				for _,file in ipairs(list) do
 					fs.flushVirtualToDisk(file)
@@ -517,35 +820,6 @@ local function prevWindow(held,up)
 			return switchWindow(program.pid)
 		end
 	end
-end
-
-function processors.NOS_LL_mouse_drag(m,x,y)
-	if (y+ymod) == 0 or (x+xmod) == 0 then return end
-	return 4,"d",m,(x+xmod),(y+ymod)
-end
-
-function processors.NOS_LL_mouse_scroll(m,x,y)
-	if (y+ymod) == 0 or (x+xmod) == 0 then return end
-	return 4,"s",m,(x+xmod),(y+ymod)
-end
-
-function processors.NOS_LL_mouse_click(m,x,y)
-	if (y+ymod) == 0 or (x+xmod) == 0 then
-		if m ~= 1 then
-			return
-		end
-		for ind,i in ipairs(program_positions) do
-			if x > i[2] and x < i[4] then
-				switchWindow(i[1])
-			end
-		end
-	end
-	return 4,"c",m,(x+xmod),(y+ymod)
-end
-
-function processors.NOS_LL_mouse_up(m,x,y)
-	if (y+ymod) == 0 or (x+xmod) == 0 then return end
-	return 4,"u",m,(x+xmod),(y+ymod)
 end
 
 multishellImplementation.launch = os.spawn
@@ -592,26 +866,53 @@ registerHotkey(keys.pageUp,prevWindow,false,true)
 registerHotkey(keys.pageDown,nextWindow,false,true)
 registerHotkey(keys.f1,lockAutoSwitching,false,true)
 
-while(true) do
-	local t = table.pack(os.pullEventRaw())
-	local process = pidRefs[currentProcess] or findNextWindowProgram()
-	local pipe = process.pipes_ext[1]
-	local win = process.window
-	if processors[t[1]] then
-		local ret = table.pack(processors[t[1]](table.unpack(t,2,t.n)))
-		if ret then
-			local pipeID = table.remove(ret,1)
-			ret.n = ret.n - 1
-			for _,i in ipairs(ret) do
-				process.pipes_ext[pipeID]:write(i)
+local ll_length = #"NOS_LL_ "
+
+local function main()
+	while(true) do
+		local t = table.pack(os.pullEventRaw())
+		local process = pidRefs[currentProcess] or findNextWindowProgram()
+		local pipe = process.pipes_ext[1]
+		local win = process.window
+		local hl_name = string.sub(t[1] or "",ll_length)
+		for _,driver in pairs(installed_drivers) do
+			if not driver.events[hl_name] then goto skip_driver end
+			for _,user in ipairs(driver.users) do
+				if user and ((not driver.requireFocus) or (user == process)) then
+					local ret = table.pack(driver.events[hl_name].processor(table.unpack(t,2,t.n)))
+					if ret.n > 0 then
+						local pipeID = table.remove(ret,1)
+						ret.n = ret.n - 1
+						for _,i in ipairs(ret) do
+							user.pipes_ext[pipeID]._handle.write(i)
+						end
+					end
+				end
+			end
+			::skip_driver::
+		end
+		if processors[t[1]] then
+			local ret = table.pack(processors[t[1]](table.unpack(t,2,t.n)))
+			if ret.n > 0 then
+				local pipeID = table.remove(ret,1)
+				ret.n = ret.n - 1
+				for _,i in ipairs(ret) do
+					process.pipes_ext[pipeID]:write(i)
+				end
 			end
 		end
+		if win and win.setup then
+			win.flush()
+		end
+		if program_bar_dirty then
+			draw_program_bar()
+			program_bar_dirty = false
+		end
 	end
-	if win and win.setup then
-		win.flush()
-	end
-	if program_bar_dirty then
-		draw_program_bar()
-		program_bar_dirty = false
-	end
+end
+
+local s,e = pcall(main)
+if not s then
+	myProgram.pipes[3]:write(tostring(e))
+	return crashScreen()
 end
