@@ -122,7 +122,10 @@ local function pullEventReplacer(env,program,args)
 			if peeked then
 				if type(peeked) == "number" then
 					io.stdin._handle.seek(1)
-					return parseKeyEvent(peeked)
+					local e = table.pack(parseKeyEvent(peeked))
+					if e[1] == "key" then
+						return table.unpack(e,1,e.n)
+					end
 				else
 					io.stdin._handle.seek(1)
 				end
@@ -132,6 +135,25 @@ local function pullEventReplacer(env,program,args)
 		end
 	end
 
+	-- destructive, returns only first key event skipping any char events
+	local function pullKeyUpStdin()
+		while(true) do
+			local peeked = io.stdin._handle.peek(1)
+			if peeked then
+				if type(peeked) == "number" then
+					io.stdin._handle.seek(1)
+					local e = table.pack(parseKeyEvent(peeked))
+					if e[1] == "key_up" then
+						return table.unpack(e,1,e.n)
+					end
+				else
+					io.stdin._handle.seek(1)
+				end
+			else
+				coroutine.yield()
+			end
+		end
+	end
 	-- destructive, returns only first char event skipping any key events
 	local function pullCharStdin()
 		while(true) do
@@ -149,30 +171,57 @@ local function pullEventReplacer(env,program,args)
 		end
 	end
 
-	-- local function pullMouse()
-	-- 	while(true) do
-	-- 		local peeked = io.stdmouse._handle.peek(1)
-	-- 		if peeked then
-	-- 			if type(peeked) == "string" then
-	-- 				io.stdmouse._handle.seek(1)
-	-- 				return "char",peeked
-	-- 			else
-	-- 				io.stdmouse._handle.seek(1)
-	-- 			end
-	-- 		else
-	-- 			coroutine.yield()
-	-- 		end
-	-- 	end
-	-- end
+	-- destructive, returns only first mouse_up event skipping any other mouse events
+	local function pullMouse(e_code)
+		local e_name = mouse_events[e_code]
+		while(true) do
+			local peeked = io.stdmouse._handle.peek(1)
+			if peeked and io.stdmouse._handle.length() > 3 then
+				if type(peeked) == "string" then
+					local x = io.stdmouse._handle.peek(2)
+					local y = io.stdmouse._handle.peek(3)
+					local z = io.stdmouse._handle.peek(4)
+					io.stdmouse._handle.seek(4)
+					if mouse_events[peeked] then
+						return mouse_events[peeked],x,y,z
+					end
+				else
+					local seekpoint = 1
+					for i=1,math.min(100,io.stdmouse._handle.length()) do
+						if type(io.stdmouse._handle.peek()) ~= "string" then
+							seekpoint = i
+						else
+							break
+						end
+					end
+					io.stdmouse._handle.seek(seekpoint)
+				end
+			end
+			coroutine.yield()
+		end
+	end
+
+	local function pullMouseUp()
+		return pullMouse("u")
+	end
+	local function pullMouseScroll()
+		return pullMouse("s")
+	end
+	local function pullMouseClick()
+		return pullMouse("c")
+	end
+	local function pullMouseDrag()
+		return pullMouse("d")
+	end
 
 	local pullTable = {
 		["char"] = pullCharStdin,
 		["key"] = pullKeyStdin,
-		-- ["key_up"] = pullKeyStdin,
-		-- ["mouse_up"] = pullMouse,
-		-- ["mouse_scroll"] = pullMouse,
-		-- ["mouse_click"] = pullMouse,
-		-- ["mouse_drag"] = pullMouse,
+		["key_up"] = pullKeyUpStdin,
+		["mouse_up"] = pullMouseUp,
+		["mouse_scroll"] = pullMouseScroll,
+		["mouse_click"] = pullMouseClick,
+		["mouse_drag"] = pullMouseDrag,
 	}
 
 -- versions that will parallel between pullEvent and a stdin read
@@ -220,7 +269,9 @@ local function pullEventReplacer(env,program,args)
 	setfenv(newOS.pullEventRaw,env)
 	setfenv(pullStdin,env)
 	setfenv(pullKeyStdin,env)
+	setfenv(pullKeyUpStdin,env)
 	setfenv(pullCharStdin,env)
+	setfenv(pullMouse,env)
 end
 
 addEnvPatch(stdMouse)
