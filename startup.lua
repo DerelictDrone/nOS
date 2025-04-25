@@ -13,7 +13,9 @@ if fs.exists("./.os/main.lua") then
         os.oldReboot,os.oldShutdown = nil,nil
         _G.sleep = oldsleep
         loadfile("./.os/main.lua")()
-        return newOS()
+        local s,e = pcall(newOS)
+        print(e)
+        sleep(5)
     end
     os.shutdown,os.reboot = loader,loader
     term.clear()
