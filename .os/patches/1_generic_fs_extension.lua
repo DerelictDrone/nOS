@@ -5,6 +5,7 @@ local function addFSExtensions(env)
 	env.fs = gfs
 	function gfs.splitPath(filename)
 		if not filename then return {} end
+		if type(filename) ~= "string" then error("Unexpected type for path",2) end
 		filename = filename:gsub("\\","/")
 		filename = filename:gsub("/+","/")
 		local prevpoint = 1

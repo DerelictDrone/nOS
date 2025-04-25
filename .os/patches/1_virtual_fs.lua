@@ -171,12 +171,16 @@ local function addVirtualFS(env,program)
 		end,
 	}
 	setmetatable(program.local_mounts,filesystem_meta)
-	function vfs.mount(dir,data)
+	function vfs.mount(path,data)
 		if not data or not data.files then return end
+		if not program.local_mounts[path] and #data.files == 0 then
+			program.local_mounts[path] = {}
+			return
+		end
 		for k,v in pairs(data.files) do
 			if type(v) == "string" then
 				local time = os.time(os.date("*t"))
-				program.local_mounts[dir.."/"..k] = {
+				program.local_mounts[path.."/"..k] = {
 					v,
 					generic_string_fhandle,
 					attributes = {
@@ -191,12 +195,12 @@ local function addVirtualFS(env,program)
 		end
 	end
 	vfs.mountLocal = vfs.mount
-	function vfs.mountGlobal(dir,data)
+	function vfs.mountGlobal(path,data)
 		if not data or not data.files then return end
 		for k,v in pairs(data.files) do
 			if type(v) == "string" then
 				local time = os.time(os.date("*t"))
-				__newindex(global_mounts,dir.."/"..k, {
+				__newindex(global_mounts,path.."/"..k, {
 					v,
 					generic_string_fhandle,
 					attributes = {
@@ -243,18 +247,18 @@ local function addVirtualFS(env,program)
 	function vfs.getPreferVirtualFiles()
 		return vfs.preferVirtualFiles
 	end
-	function vfs.exists(name)
-		if not name then return fs.exists(name) end
+	function vfs.exists(path)
+		if not path then return fs.exists(path) end
 		local tested
 		::virtual::
 		if vfs.preferVirtualFiles or tested then
-			if program.local_mounts[name] then
+			if program.local_mounts[path] then
 				return true
 			end
 			if tested then return false end
-			return fs.exists(name)
+			return fs.exists(path)
 		else
-			if fs.exists(name) then
+			if fs.exists(path) then
 				return true
 			else
 				tested = true
@@ -262,40 +266,58 @@ local function addVirtualFS(env,program)
 			end
 		end
 	end
-	function vfs.isVirtual(name)
+	function vfs.isVirtual(path)
 		if vfs.preferVirtualFiles then
-			if program.local_mounts[name] then return true end
+			if program.local_mounts[path] then return true end
 			return false
 		else
-			if fs.exists(name) then
+			if env.fs.exists(path) then
 				return false
 			end
-			if program.local_mounts[name] then return true end
+			if program.local_mounts[path] then return true end
 			return false
 		end
 	end
-	function vfs.isVirtualLocal(name)
+	function vfs.isVirtualLocal(path)
 		if vfs.preferVirtualFiles then
-			if __index(program.local_mounts,name) then return true end
+			if __index(program.local_mounts,path) then return true end
 			return false
 		else
-			if fs.exists(name) then
+			if env.fs.exists(path) then
 				return false
 			end
-			if __index(program.local_mounts,name) then return true end
+			if __index(program.local_mounts,path) then return true end
 			return false
 		end
 	end
-	function vfs.isVirtualGlobal(name)
+	function vfs.isVirtualGlobal(path)
 		if vfs.preferVirtualFiles then
-			if __index(global_mounts,name) then return true end
+			if __index(global_mounts,path) then return true end
 			return false
 		else
-			if fs.exists(name) then
+			if env.fs.exists(path) then
 				return false
 			end
-			if __index(global_mounts,name) then return true end
+			if __index(global_mounts,path) then return true end
 			return false
+		end
+	end
+	local delete = env.fs.delete or fs.delete
+	function vfs.delete(path)
+		if vfs.isVirtual(path) then
+			local vlocal = vfs.isVirtualLocal(path)
+			local ftable
+			local dir = env.fs.getDir(path)
+			if vlocal then
+				ftable = __index(program.local_mounts,dir)
+			else
+				ftable = __index(global_mounts,dir)
+			end
+			if not ftable then return end
+			ftable[env.fs.getName(path)] = nil
+			return
+		else
+			return delete(path)
 		end
 	end
 	function vfs.isDir(name)
@@ -316,21 +338,21 @@ local function addVirtualFS(env,program)
 			if fs.isDir(name) then
 				return true
 			else
-				if fs.exists(name) then return false end
+				if env.fs.exists(name) then return false end
 				tested = true
 				goto virtual
 			end
 		end
 	end
-	function vfs.open(name,mode)
-		if not name or not mode then return fs.open(name,mode) end
+	function vfs.open(path,mode)
+		if not path or not mode then return fs.open(path,mode) end
 		::virtual::
 		local tested
 		if vfs.preferVirtualFiles or tested then
-			local f = program.local_mounts[name]
+			local f = program.local_mounts[path]
 			if not f then
 				local isvirtual = false
-				local str = name
+				local str = path
 				while(true) do
 					str = fs.getDir(str)
 					if str == ".." or str == "" then break end
@@ -339,36 +361,37 @@ local function addVirtualFS(env,program)
 				end
 				if isvirtual then
 				-- filesystem is virtual so lets just make it then try again
-					program.local_mounts[name] = {
+					program.local_mounts[path] = {
 						"",
 						generic_string_fhandle
 					}
-					return vfs.open(name,mode)
+					return vfs.open(path,mode)
 				end
-				local s,e = pcall(fs.open,name,mode)
+				local s,e = pcall(fs.open,path,mode)
 				if not s then
-					error(name.."\n"..mode.."\n",1)
+					error(path.."\n"..mode.."\n",1)
 				end
 				return e
 			end
 			return f[2](f,mode)
 		else
-			local f = fs.exists(name)
+			local f = env.fs.exists(path)
 			if not f then
 				tested = true
 				goto virtual
 			else
-				return fs.open(name,mode)
+				return fs.open(path,mode)
 			end
 		end
 	end
+	local list = env.fs.list or fs.list
 	function vfs.list(dir)
 		local m = getmetatable(program.local_mounts)
 		local f = m.__original_index(program.local_mounts,dir)
 		local g = m.__original_index(global_mounts,dir)
 		local l = {}
-		if fs.exists(dir) then
-			l = fs.list(dir)
+		if env.fs.exists(dir) then
+			l = list(dir)
 		end
 		local names = {}
 		if f then
@@ -394,11 +417,11 @@ local function addVirtualFS(env,program)
 		end
 		return l
 	end
-	function vfs.flushVirtualToDisk(vname,rname)
-		if not vfs.isVirtual(vname) then return false,"File isn't virtual" end
-		local v = vfs.open(vname,"r")
+	function vfs.flushVirtualToDisk(path,dest)
+		if not vfs.isVirtual(path) then return false,"File isn't virtual" end
+		local v = vfs.open(path,"r")
 		if not v then return false,"Couldn't open virtual file" end
-		local f = fs.open(rname or vname,"w")
+		local f = fs.open(dest or path,"w")
 		if not f then return false,"Couldn't open file" end
 		f.write(v.readAll())
 		f.close()
