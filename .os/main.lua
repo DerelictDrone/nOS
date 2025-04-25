@@ -35,7 +35,11 @@ local function patchProgramMeta(program,program_meta,caller)
     end
 end
 
-local olderr = _G.error
+-- local olderr = _G.error
+-- function error(...)
+--     print(...)
+--     olderr(...)
+-- end
 
 function newOS()
     newOS = nil
@@ -162,6 +166,29 @@ function newOS()
     local function getRawPrograms()
         return topLevelCoroutines,pidRefs
     end
+    local function clearListeners(program)
+        -- remove pre-existing listeners before adding new ones
+        for _,listener in ipairs(program.listeners) do
+            local found = false
+            for ind,process in ipairs(eventListeners[listener]) do
+                if process == program then
+                    table.remove(eventListeners[listener],ind)
+                    found = true
+                    break
+                end
+            end
+        end
+        program.listeners = {}
+    end
+    local function addListener(program,event)
+        if type(event) == "string" then
+            if not eventListeners[event] then
+                eventListeners[event] = {}
+            end
+            table.insert(program.listeners,event)
+            table.insert(eventListeners[event],program)
+        end
+    end
     local lastEvent = {}
     -- If a program blacklists an event it'll start showing up as
     -- NOS_LL_$event instead which must be listened for separately
@@ -193,26 +220,9 @@ function newOS()
                         res[2] = "NOS_no_filter"
                     end
                     table.remove(res,1)
-                    -- remove pre-existing listeners before adding new ones
-                    for _,listener in ipairs(curProcess.listeners) do
-                        local found = false
-                        for ind,process in ipairs(eventListeners[listener]) do
-                            if process == curProcess then
-                                table.remove(eventListeners[listener],ind)
-                                found = true
-                                break
-                            end
-                        end
-                    end
-                    curProcess.listeners = {}
+                    clearListeners(curProcess)
                     for _,value in ipairs(res) do
-                        if type(value) == "string" then
-                            if not eventListeners[value] then
-                                eventListeners[value] = {}
-                            end
-                            table.insert(curProcess.listeners,value)
-                            table.insert(eventListeners[value],curProcess)
-                        end
+                        addListener(curProcess,value)
                     end
                 end
             end
@@ -227,6 +237,8 @@ function newOS()
             addEnvPatch = addEnvPatch,
             addProgramMeta = addProgramMeta,
             getRawPrograms = getRawPrograms,
+            clearListeners = clearListeners,
+            addListener = addListener,
             }
         },ospath.."modules/"..i)
         runSet({pidRefs[pid]})
