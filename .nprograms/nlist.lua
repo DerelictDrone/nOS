@@ -1,6 +1,6 @@
-local cwd = shell.dir and shell.dir() or fs.getCWD()
+local dir = arg[1] or ""
 
-local list = fs.list(cwd)
+local list = fs.list(dir)
 
 local color_groups = {}
 
