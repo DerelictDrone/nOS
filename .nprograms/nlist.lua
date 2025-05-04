@@ -4,7 +4,7 @@ local list = fs.list(dir)
 
 local color_groups = {}
 
-local showHidden = settings.get("list.showhidden")
+local showHidden = settings.get("list.show_hidden")
 
 for ind, i in ipairs(list) do
 	local c = fs.getAttributeColor(i)
@@ -39,18 +39,36 @@ end
 
 local x, y = term.getSize()
 local curx, cury = term.getCursorPos()
-local function nextLine()
+local lprints = 0
+local function nextLine(last)
 	curx,cury = term.getCursorPos()
-	if cury == y then
+	if cury >= y-1 then
+		if lprints >= y-1 then
+			term.setCursorPos(1,y)
+			term.write("Press any key to continue")
+			os.pullEvent("key")
+			term.clearLine()
+		end
+		if last then
+			term.setCursorPos(1,y)
+			return
+		end
 		term.scroll(1)
 		term.setCursorPos(1,cury)
 	else
 		term.setCursorPos(1,cury+1)
 	end
+	lprints = lprints + 1
 end
 -- term.scroll(1)
 term.setCursorPos(1, cury)
 local startcolor = term.getTextColor()
+-- if curx starts at y or y-1 this fixes scrolling
+if cury >= y-1 then
+	term.scroll(1)
+	cury = cury - 1
+	term.setCursorPos(1, cury)
+end
 while (true) do
 	::start::
 	local t = table.remove(arg, 1)
@@ -59,7 +77,7 @@ while (true) do
 		term.setTextColor(t)
 		goto start
 	elseif not t then
-		nextLine()
+		nextLine(true)
 		term.setTextColor(startcolor)
 		return
 	end
