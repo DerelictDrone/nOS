@@ -1,6 +1,0 @@
-{
-	"routing.lua",
-	"peripheral_server.lua",
-	"nostalgia.lua",
-	"shell.lua",
-}
