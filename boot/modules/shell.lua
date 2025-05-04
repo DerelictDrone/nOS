@@ -26,10 +26,30 @@ function shell.resolve(str)
 end
 ]]
 
+local run = [[
+function shell.run(...)
+	local tWords = tokenise(...)
+	local sCommand = tWords[1]
+	if sCommand then -- try extension association
+		local ext = sCommand:match("[^%.]*$")
+		local s = settings.get("associations."..(ext or ""):lower())
+		if s then
+			tWords = tokenise(string.format(s,table.unpack(tWords)))
+			sCommand = tWords[1]
+		end
+	end
+	if sCommand then
+		return shell.execute(sCommand, table.unpack(tWords, 2))
+	end
+	return false
+end
+]]
+
 local diffs = {
 	["shell.dir"] = {str = dir},
 	["shell.setDir"] = {str = setDir},
 	["shell.resolve"] = {str = resolve},
+	["shell.run"] = {str = run},
 }
 local f = loadFileWithDiffs("rom/programs/shell.lua",diffs,nil,nil,_ENV)
 f()
