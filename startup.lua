@@ -1,6 +1,6 @@
 -- bootloader by phpminor
 
-if fs.exists("./.os/main.lua") then
+if fs.exists("./boot/main.lua") then
     if os.bootloaded then return end
     local oldsleep = sleep
     _G.sleep = function() end
@@ -12,7 +12,7 @@ if fs.exists("./.os/main.lua") then
         os.shutdown = os.oldShutdown
         os.oldReboot,os.oldShutdown = nil,nil
         _G.sleep = oldsleep
-        loadfile("./.os/main.lua")()
+        loadfile("./boot/main.lua")()
         local s,e = pcall(newOS)
         print(e)
         sleep(5)
