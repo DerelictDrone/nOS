@@ -43,7 +43,6 @@ local pathPolyfills = {
 	isDir = fs.isDir,
 	list = fs.list,
 	getName = fs.getName,
-	getDir = fs.getDir,
 	getSize = fs.getSize,
 	exists = fs.exists,
 	isReadOnly = fs.isReadOnly,
@@ -149,6 +148,17 @@ local function createMFS(env,program,arg)
 		end
 		return str
 	end
+	local getDir = fs.getDir
+	function mfs.getDir(path)
+		if not path or type(path) ~= "string" then error("bad argument #1 (expected string, got "..type(path)..")") end
+		local npath = mfs.combine(path)
+		local abs = npath:sub(1,1) == "/"
+		local dir = getDir(path)
+		if abs then
+			return "/"..dir
+		end
+		return dir
+	end
 	local find = env.fs.find
 	function mfs.find(pattern)
 		local files = find(mfs.combine(pattern))
@@ -158,26 +168,9 @@ local function createMFS(env,program,arg)
 		if mfs.allPathsAbsolute then
 			return files
 		end
-		local cwd_r = mfs.cwd:sub(2)
+		-- the paths are all absolute anyway, just throw a / on the front and call it a day
 		for ind,v in ipairs(files) do
-			-- remove the cwd from any that have it
-			local s,e
-			local cs,ce = v:match("^()"..mfs.cwd.."()")
-			local rs,re = v:match("^()"..cwd_r.."()")
-			-- convert any that don't have the cwd to absolute
-			if not cs and not rs then
-				files[ind] = "/"..v
-				goto skip
-			end
-			if v == cwd_r or v == mfs.cwd then
-				-- just ignore it if its our cwd exactly
-				-- should be fine if it's a multiple of our cwd?
-				files[ind] = v
-				goto skip
-			end
-			s,e = cs or rs,ce or re
-			files[ind] = v:sub(0,s-1)..v:sub(e+1)
-			::skip::
+			files[ind] = mfs.combine("/",v)
 		end
 		return files
 	end
