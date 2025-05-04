@@ -118,6 +118,16 @@ local function generic_string_fhandle(self,mode)
 	return handle
 end
 
+local function isCallable(fn)
+	if type(fn) == "function" then
+		return true
+	end
+	local meta = getmetatable(fn)
+	if not meta then return false end
+	if meta.__call and type(meta.__call) == "function" then return true end
+	return false
+end
+
 local function addVirtualFS(env,program)
 	local fs = env.fs or fs
 	local vfs = setmetatable({},createProxyTable({fs}))
@@ -171,36 +181,34 @@ local function addVirtualFS(env,program)
 		end,
 	}
 	setmetatable(program.local_mounts,filesystem_meta)
-	function vfs.mount(path,data)
-		if not data or not data.files then return end
-		if not program.local_mounts[path] and #data.files == 0 then
-			program.local_mounts[path] = {}
-			return
+	local function mount(getter,setter,path,data)
+		if not data or not data.files then
+			setter(path,{})
+			return true
 		end
-		for k,v in pairs(data.files) do
-			if type(v) == "string" then
-				local time = os.time(os.date("*t"))
-				program.local_mounts[path.."/"..k] = {
-					v,
-					generic_string_fhandle,
-					attributes = {
-						created = time,
-						modified = time,
-						modification = time,
-						size = #v,
-						isReadOnly = false
-					}
-				}
+		if not program.local_mounts[path] and #data.files == 0 then
+			setter(path,{})
+			return true
+		end
+		local stack = {}
+		local namestack = {}
+		local parsed = {} -- hold duplicates
+		local cur,path_ext
+		::restart::
+		cur = table.remove(stack)
+		path_ext = table.remove(namestack) or ""
+		for _,v in ipairs(parsed) do
+			if v == cur then
+				-- duplicate table, skip it(no recursion, wah wah.)
+				goto restart
 			end
 		end
-	end
-	vfs.mountLocal = vfs.mount
-	function vfs.mountGlobal(path,data)
-		if not data or not data.files then return end
-		for k,v in pairs(data.files) do
-			if type(v) == "string" then
+		table.insert(parsed,data)
+		for k,v in pairs(cur) do
+			local t = type(v)
+			if t == "string" then
 				local time = os.time(os.date("*t"))
-				__newindex(global_mounts,path.."/"..k, {
+				setter(fs.combine(path,path_ext,k),{
 					v,
 					generic_string_fhandle,
 					attributes = {
@@ -211,8 +219,41 @@ local function addVirtualFS(env,program)
 						isReadOnly = false
 					}
 				})
+				goto skip
 			end
+			if t == "table" then
+				if v[2] then -- check for a handle generator
+					setter(fs.combine(path,path_ext,k),v)
+				else
+					table.insert(stack,v) -- no handle generator, must be a directory
+					table.insert(namestack,fs.combine(path_ext,k))
+				end
+			end
+			::skip::
 		end
+		if #stack > 0 then
+			goto restart
+		end
+		return true
+	end
+	local function localgetter(k)
+		return program.local_mounts[k]
+	end
+	local function localsetter(k,v)
+		program.local_mounts[k] = v
+	end
+	function vfs.mount(path,data)
+		return mount(localgetter,localsetter,path,data)
+	end
+	vfs.mountLocal = vfs.mount
+	local function globalgetter(k)
+		return __index(global_mounts,k)
+	end
+	local function globalsetter(k,v)
+		return __newindex(global_mounts,k,v)
+	end
+	function vfs.mountGlobal(path,data)
+		return mount(globalgetter,globalsetter,path,data)
 	end
 	function vfs.unmount(path)
 		if vfs.isVirtual(path) then
@@ -271,7 +312,7 @@ local function addVirtualFS(env,program)
 			if program.local_mounts[path] then return true end
 			return false
 		else
-			if env.fs.exists(path) then
+			if fs.exists(path) then
 				return false
 			end
 			if program.local_mounts[path] then return true end
@@ -283,7 +324,7 @@ local function addVirtualFS(env,program)
 			if __index(program.local_mounts,path) then return true end
 			return false
 		else
-			if env.fs.exists(path) then
+			if fs.exists(path) then
 				return false
 			end
 			if __index(program.local_mounts,path) then return true end
@@ -295,37 +336,36 @@ local function addVirtualFS(env,program)
 			if __index(global_mounts,path) then return true end
 			return false
 		else
-			if env.fs.exists(path) then
+			if fs.exists(path) then
 				return false
 			end
 			if __index(global_mounts,path) then return true end
 			return false
 		end
 	end
-	local delete = env.fs.delete or fs.delete
 	function vfs.delete(path)
 		if vfs.isVirtual(path) then
 			local vlocal = vfs.isVirtualLocal(path)
 			local ftable
-			local dir = env.fs.getDir(path)
+			local dir = fs.getDir(path)
 			if vlocal then
 				ftable = __index(program.local_mounts,dir)
 			else
 				ftable = __index(global_mounts,dir)
 			end
 			if not ftable then return end
-			ftable[env.fs.getName(path)] = nil
+			ftable[fs.getName(path)] = nil
 			return
 		else
-			return delete(path)
+			return fs.delete(path)
 		end
 	end
-	function vfs.isDir(name)
-		if not name then return fs.isDir(name) end
+	function vfs.isDir(path)
+		if not path then return fs.isDir(path) end
 		local tested
 		::virtual::
 		if vfs.preferVirtualFiles or tested then
-			local mnt = program.local_mounts[name]
+			local mnt = program.local_mounts[path]
 			if mnt then
 				if mnt[1] then -- has contents thus it's a file
 					return false
@@ -333,12 +373,12 @@ local function addVirtualFS(env,program)
 				return true -- has no contents, thus it's a dir
 			end
 			if tested then return false end
-			return fs.isDir(name) -- doesn't exist, check regular
+			return fs.isDir(path) -- doesn't exist, check regular
 		else
-			if fs.isDir(name) then
+			if fs.isDir(path) then
 				return true
 			else
-				if env.fs.exists(name) then return false end
+				if fs.exists(path) then return false end
 				tested = true
 				goto virtual
 			end
@@ -375,7 +415,7 @@ local function addVirtualFS(env,program)
 			end
 			return f[2](f,mode)
 		else
-			local f = env.fs.exists(path)
+			local f = fs.exists(path)
 			if not f then
 				tested = true
 				goto virtual
@@ -384,14 +424,13 @@ local function addVirtualFS(env,program)
 			end
 		end
 	end
-	local list = env.fs.list or fs.list
 	function vfs.list(dir)
 		local m = getmetatable(program.local_mounts)
 		local f = m.__original_index(program.local_mounts,dir)
 		local g = m.__original_index(global_mounts,dir)
 		local l = {}
-		if env.fs.exists(dir) then
-			l = list(dir)
+		if fs.exists(dir) then
+			l = fs.list(dir)
 		end
 		local names = {}
 		if f then
