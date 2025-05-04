@@ -1,0 +1,4 @@
+{
+	"nostalgia.lua",
+	"shell.lua",
+}
