@@ -3,6 +3,60 @@
 
 local function patchSettings(env)
 	local settings = env.settings
+	-- extract values table from original rq
+	-- #2 is _ENV, 1 and 3 are as follows.
+	settings.define("settings.split_settings",{
+		description = "Any setting with a 'group.settingName' structure will be exported to a file named 'group'",
+		default = false,
+		type = "boolean"
+	})
+	settings.define("settings.directory",{
+		description = "Directory to put settings files in by default",
+		default = "/",
+		type = "string"
+	})
+	local _,expect = debug.getupvalue(settings.save,1)
+	local _,values = debug.getupvalue(settings.save,3)
+	function settings.save(path)
+		expect(1, path, "string", "nil")
+		local path = path or fs.combine((settings.get("settings.directory") or ""),".settings")
+		local pfilename = fs.getName(path)
+		if settings.get("settings.split_settings") then
+			local files = {}
+			for k,v in pairs(values) do
+				local s,e = k:match("()%.()")
+				if not e then
+					if not files[pfilename] then
+						files[pfilename] = {}
+					end
+					files[pfilename][k] = v
+					goto skip
+				end
+				local fname = k:sub(1,s-1)
+				if not files[fname] then
+					files[fname] = {}
+				end
+				files[fname][k] = v
+				::skip::
+			end
+			local dir = fs.getDir(path)
+			for k,v in pairs(files) do
+				local f = fs.open(fs.combine(dir,k),"w")
+				if not f then return false end
+				f.write(textutils.serialize(v))
+				f.close()
+			end
+			return true
+		end
+		local file = fs.open(path, "w")
+		if not file then
+			return false
+		end
+		file.write(textutils.serialize(values))
+		file.close()
+		return true
+	end
+
 	settings.define("shell.allow_startup", {
 		default = true,
 		description = "Run startup files when the computer turns on.",
@@ -115,7 +169,22 @@ local function patchSettings(env)
 			end
 		end
 	end
-	settings.load(".settings")
+	function settings.reload()
+		settings.clear()
+		local dir = settings.get("settings.directory")
+		if not settings.get("settings.split_settings") then
+			settings.load(fs.combine(dir,".settings"))
+			return true
+		end
+		local sfiles = fs.list(dir)
+		for _,i in ipairs(sfiles) do
+			local p = fs.combine(dir,i)
+			if not fs.isDir(p) then
+				if not settings.load(p) then return false end
+			end
+		end
+		return true
+	end
 end
 
 addEnvPatch(patchSettings)
