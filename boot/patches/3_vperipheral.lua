@@ -68,14 +68,14 @@ function peripheral.find(type,fn,...)
 	if rem then
 		for k,_ in pairs(rem) do
 			local p = peripheral.wrap(k)
-			if(fn(p.name,p,true)) then
+			if(fn(k,p,true)) then
 				table.insert(final,p)
 			end
 		end
 	end
 	if loc then
 		for _,p in ipairs(loc) do
-			if(fn(p.name,p,false)) then
+			if(fn(k,p,false)) then
 				table.insert(final,p)
 			end
 		end
