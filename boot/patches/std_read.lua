@@ -242,7 +242,7 @@ local function pullEventReplacer(env,program,args)
 		function() returner = table.pack(pullEvent(table.unpack(args,1,args.n))) end
 		)
 		if who == 1 and returner[1] == "terminate" then
-			error("Terminated", 2)
+			error("Terminated", 0)
 		end
 		return table.unpack(returner)
 	end
