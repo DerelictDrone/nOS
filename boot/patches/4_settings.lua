@@ -17,6 +17,7 @@ local function patchSettings(env)
 	})
 	local _,expect = debug.getupvalue(settings.save,1)
 	local _,values = debug.getupvalue(settings.save,3)
+	local unlinked_groups = {}
 	function settings.save(path)
 		expect(1, path, "string", "nil")
 		local path = path or fs.combine((settings.get("settings.directory") or ""),".settings")
@@ -41,11 +42,16 @@ local function patchSettings(env)
 			end
 			local dir = fs.getDir(path)
 			for k,v in pairs(files) do
+				unlinked_groups[k] = nil
 				local f = fs.open(fs.combine(dir,k),"w")
 				if not f then return false end
 				f.write(textutils.serialize(v))
 				f.close()
 			end
+			for k,_ in pairs(unlinked_groups) do
+				fs.delete(fs.combine(dir,k))
+			end
+			unlinked_groups = {}
 			return true
 		end
 		local file = fs.open(path, "w")
@@ -56,6 +62,30 @@ local function patchSettings(env)
 		file.close()
 		return true
 	end
+	local details = debug.getupvalue(settings.set,2)
+	local function set_value(name, new)
+		local old = values[name]
+		if old == nil then
+			local opt = details[name]
+			old = opt and opt.default
+		end
+	
+		values[name] = new
+		if old ~= new then
+			-- This should be safe, as os.queueEvent copies values anyway.
+			os.queueEvent("setting_changed", name, new, old)
+		end
+		if new == nil then
+			local s,e = name:match("()%.()")
+			if e then
+				-- if there are any other members of group this will clear on save
+				unlinked_groups[name:sub(1,s-1)] = true
+			end
+		end
+	end
+	debug.setupvalue(settings.set,3,set_value)
+	debug.setupvalue(settings.unset,2,set_value)
+	debug.setupvalue(settings.clear,3,set_value)
 
 	settings.define("shell.allow_startup", {
 		default = true,
