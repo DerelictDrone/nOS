@@ -395,10 +395,11 @@ local function windowizer(env,program,args)
 	local olderr = error
 	local function err(msg,ctx)
 		io.stderr:write(tostring(msg))
+		ctx = ctx or 1
 		if ctx == 0 then
 			return olderr(msg,0)
 		end
-		olderr(msg,ctx+2)
+		olderr(msg,ctx+1)
 	end
 	env.error = err
 	local function pcall2(...)
