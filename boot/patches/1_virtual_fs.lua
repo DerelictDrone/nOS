@@ -186,12 +186,12 @@ local function addVirtualFS(env,program)
 			setter(path,{})
 			return true
 		end
-		if not program.local_mounts[path] and #data.files == 0 then
+		if not getter(path) and next(data.files) == nil then
 			setter(path,{})
 			return true
 		end
-		local stack = {}
-		local namestack = {}
+		local stack = {data.files}
+		local namestack = {""}
 		local parsed = {} -- hold duplicates
 		local cur,path_ext
 		::restart::
